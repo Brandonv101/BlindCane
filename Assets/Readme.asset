@@ -31,4 +31,8 @@ MonoBehaviour:
     text:
     linkText: Submit a report
     url: https://unity3d.com/unity/qa/bug-reporting
+  - heading: Changelog
+    text: "Added Quest passthrough setup, virtual stick controller, and ray selection visuals."
+    linkText:
+    url:
   loadedLayout: 1
