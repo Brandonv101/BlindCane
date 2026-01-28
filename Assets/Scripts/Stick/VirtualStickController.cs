@@ -50,6 +50,15 @@ public class VirtualStickController : MonoBehaviour
     [SerializeField] private bool enableRayHoverHaptics = false;
     [SerializeField] private LayerMask touchMask = ~0;
 
+    [Header("Floor Touch (Headset Tracking)")]
+    [SerializeField] private bool useHeadsetFloorTouch = true;
+    [SerializeField] private Transform headset;
+    [SerializeField] private LayerMask floorMask = ~0;
+    [SerializeField, Range(0.5f, 5f)] private float floorProbeDistance = 3f;
+    [SerializeField, Range(0f, 0.2f)] private float floorContactTolerance = 0.02f;
+    [SerializeField] private bool alignRayOriginToLength = true;
+    [SerializeField] private HapticPulse floorTouchHaptics = new HapticPulse(0.6f, 0.05f, 0.08f);
+
     [System.Serializable]
     public struct HapticPulse
     {
@@ -70,6 +79,7 @@ public class VirtualStickController : MonoBehaviour
     private float nextRotationHapticTime;
     private float nextLengthHapticTime;
     private float nextTouchHapticTime;
+    private float nextFloorHapticTime;
     private bool lastSelectButton;
     private bool lastPrimaryButton;
     private bool lastSecondaryButton;
@@ -101,6 +111,7 @@ public class VirtualStickController : MonoBehaviour
             rayLine = GetComponent<LineRenderer>();
         }
 
+        TryResolveHeadset();
         initialStickScale = stickModel.localScale;
         SetupRayVisual();
         ApplyStickLength();
@@ -131,6 +142,7 @@ public class VirtualStickController : MonoBehaviour
         UpdateStickRotation();
         UpdateStickLength();
         UpdateRaycast();
+        UpdateFloorTouchFromHeadset();
         UpdateHapticStrength();
     }
 
@@ -254,6 +266,17 @@ public class VirtualStickController : MonoBehaviour
         }
 
         stickModel.localScale = scale;
+
+        if (alignRayOriginToLength && rayOrigin != null)
+        {
+            Vector3 direction = lengthScaleAxis;
+            if (direction.sqrMagnitude < 0.0001f)
+            {
+                direction = Vector3.forward;
+            }
+
+            rayOrigin.localPosition = direction.normalized * stickLength;
+        }
     }
 
     private void UpdateRaycast()
@@ -337,6 +360,40 @@ public class VirtualStickController : MonoBehaviour
         lastSecondaryButton = secondaryButton;
     }
 
+    private void UpdateFloorTouchFromHeadset()
+    {
+        if (!useHeadsetFloorTouch || rayOrigin == null)
+        {
+            return;
+        }
+
+        if (headset == null && !TryResolveHeadset())
+        {
+            return;
+        }
+
+        if (!Physics.Raycast(headset.position, Vector3.down, out RaycastHit hitInfo, floorProbeDistance, floorMask))
+        {
+            return;
+        }
+
+        float tipHeight = rayOrigin.position.y;
+        float floorHeight = hitInfo.point.y;
+        bool touching = tipHeight <= floorHeight + floorContactTolerance;
+        if (!touching)
+        {
+            return;
+        }
+
+        if (Time.time < nextFloorHapticTime)
+        {
+            return;
+        }
+
+        SendHapticPulse(GetPrimaryDevice(), floorTouchHaptics);
+        nextFloorHapticTime = Time.time + floorTouchHaptics.repeatRate;
+    }
+
     private Vector2 GetRotationAxis()
     {
         InputDevice primary = GetPrimaryDevice();
@@ -391,6 +448,30 @@ public class VirtualStickController : MonoBehaviour
     private InputDevice GetPrimaryDevice()
     {
         return stickHand == Handedness.Left ? leftDevice : rightDevice;
+    }
+
+    private bool TryResolveHeadset()
+    {
+        if (headset != null)
+        {
+            return true;
+        }
+
+        Camera mainCamera = Camera.main;
+        if (mainCamera != null)
+        {
+            headset = mainCamera.transform;
+            return true;
+        }
+
+        GameObject found = GameObject.Find("CenterEyeAnchor");
+        if (found != null)
+        {
+            headset = found.transform;
+            return true;
+        }
+
+        return false;
     }
 
     private Transform FindControllerAnchor(Handedness handedness)
