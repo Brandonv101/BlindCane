@@ -125,27 +125,34 @@ public class ReadmeEditor : Editor
         var readme = (Readme)target;
         Init();
 
-        foreach (var section in readme.sections)
+        if (readme.sections != null)
         {
-            if (!string.IsNullOrEmpty(section.heading))
+            foreach (var section in readme.sections)
             {
-                GUILayout.Label(section.heading, HeadingStyle);
-            }
-
-            if (!string.IsNullOrEmpty(section.text))
-            {
-                GUILayout.Label(section.text, BodyStyle);
-            }
-
-            if (!string.IsNullOrEmpty(section.linkText))
-            {
-                if (LinkLabel(new GUIContent(section.linkText)))
+                if (!string.IsNullOrEmpty(section.heading))
                 {
-                    Application.OpenURL(section.url);
+                    GUILayout.Label(section.heading, HeadingStyle);
                 }
-            }
 
-            GUILayout.Space(k_Space);
+                if (!string.IsNullOrEmpty(section.text))
+                {
+                    GUILayout.Label(section.text, BodyStyle);
+                }
+
+                if (!string.IsNullOrEmpty(section.linkText))
+                {
+                    if (LinkLabel(new GUIContent(section.linkText)))
+                    {
+                        Application.OpenURL(section.url);
+                    }
+                }
+
+                GUILayout.Space(k_Space);
+            }
+        }
+        else
+        {
+            GUILayout.Label("Readme has no sections.", BodyStyle);
         }
 
         if (GUILayout.Button("Remove Readme Assets", ButtonStyle))

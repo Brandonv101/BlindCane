@@ -153,6 +153,11 @@ public class VirtualStickController : MonoBehaviour
             return;
         }
 
+        if (rayGradient == null)
+        {
+            rayGradient = new Gradient();
+        }
+
         rayLine.positionCount = 2;
         rayLine.startWidth = rayStartWidth;
         rayLine.endWidth = rayEndWidth;
