@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.XR;
@@ -13,10 +14,13 @@ public class HandMenuController : MonoBehaviour
     [SerializeField, Min(0.0005f)] private float menuScale = 0.0015f;
 
     [Header("Menu Layout")]
-    [SerializeField] private Vector2 panelSize = new Vector2(300f, 210f);
-    [SerializeField, Min(10f)] private float headerHeight = 36f;
+    [SerializeField] private Vector2 panelSize = new Vector2(360f, 420f);
+    [SerializeField, Min(10f)] private float headerHeight = 34f;
     [SerializeField, Min(10f)] private float buttonHeight = 44f;
     [SerializeField, Min(0f)] private float buttonSpacing = 8f;
+    [SerializeField, Min(18f)] private float swatchSize = 30f;
+    [SerializeField, Min(0f)] private float swatchSpacing = 6f;
+    [SerializeField, Min(1)] private int swatchColumns = 5;
 
     [Header("Input")]
     [SerializeField] private bool useLeftHandPinchToToggle = true;
@@ -30,6 +34,8 @@ public class HandMenuController : MonoBehaviour
     private MenuButton recenterButton;
     private MenuButton nightButton;
     private MenuButton passthroughButton;
+    private MenuSlider hapticsSlider;
+    private readonly List<MenuSwatch> raySwatches = new List<MenuSwatch>();
     private bool menuVisible;
     private float nextToggleTime;
     private bool wasPinching;
@@ -38,6 +44,9 @@ public class HandMenuController : MonoBehaviour
     private VirtualStickController stick;
     private StreetBackdropSpawner street;
     private bool passthroughEnabled = true;
+    private Material defaultSkybox;
+    private Camera mainCamera;
+    private int hapticsLevelIndex = 1;
 
     private OVRHand leftHand;
     private OVRSkeleton leftSkeleton;
@@ -52,11 +61,32 @@ public class HandMenuController : MonoBehaviour
         "LeftHandAnchorDetached"
     };
 
+    private readonly Color[] raySwatchColors =
+    {
+        new Color(1f, 0.55f, 0.2f),
+        new Color(1f, 0.7f, 0.2f),
+        new Color(1f, 0.85f, 0.3f),
+        new Color(0.3f, 0.85f, 0.4f),
+        new Color(0.2f, 0.8f, 0.7f),
+        new Color(0.2f, 0.8f, 0.95f),
+        new Color(0.3f, 0.55f, 1f),
+        new Color(0.55f, 0.45f, 1f),
+        new Color(0.95f, 0.35f, 0.25f),
+        new Color(0.95f, 0.95f, 0.95f),
+        new Color(0.9f, 0.85f, 0.7f),
+        new Color(0.7f, 0.8f, 1f)
+    };
+
+    private readonly float[] hapticLevels = { 0.35f, 0.65f, 1f };
+    private readonly string[] hapticLabels = { "Low", "Medium", "High" };
+
     private void Awake()
     {
         ResolveReferences();
+        defaultSkybox = RenderSettings.skybox;
         BuildMenu();
         passthroughEnabled = GetPassthroughState();
+        ApplyPassthrough(passthroughEnabled);
         SetMenuVisible(false);
         UpdateLabels();
     }
@@ -134,9 +164,19 @@ public class HandMenuController : MonoBehaviour
             stick = FindFirstObjectByType<VirtualStickController>(FindObjectsInactive.Include);
         }
 
+        if (stick != null)
+        {
+            stick.SetHapticStrength(hapticLevels[hapticsLevelIndex]);
+        }
+
         if (street == null)
         {
             street = FindFirstObjectByType<StreetBackdropSpawner>(FindObjectsInactive.Include);
+        }
+
+        if (mainCamera == null)
+        {
+            mainCamera = Camera.main;
         }
     }
 
@@ -189,7 +229,7 @@ public class HandMenuController : MonoBehaviour
 
         panel = CreatePanel(root.transform);
         float y = -buttonSpacing;
-        CreateHeader(panel, "Controls");
+        CreateHeader(panel, "Controls", y);
         y -= headerHeight + buttonSpacing;
 
         recenterButton = CreateButton(panel, "Recenter Stick", y);
@@ -199,10 +239,31 @@ public class HandMenuController : MonoBehaviour
         y -= buttonHeight + buttonSpacing;
 
         passthroughButton = CreateButton(panel, "Passthrough: On", y);
+        y -= buttonHeight + buttonSpacing * 1.5f;
+
+        CreateHeader(panel, "Haptics", y);
+        y -= headerHeight + buttonSpacing;
+
+        hapticsSlider = CreateHapticsSlider(panel, y);
+        y -= buttonHeight + buttonSpacing * 1.5f;
+
+        CreateHeader(panel, "Ray Color", y);
+        y -= headerHeight + buttonSpacing;
+        y = CreateColorSwatches(panel, y);
 
         recenterButton.GetComponent<Button>().onClick.AddListener(OnRecenter);
         nightButton.GetComponent<Button>().onClick.AddListener(OnToggleNight);
         passthroughButton.GetComponent<Button>().onClick.AddListener(OnTogglePassthrough);
+
+        if (raySwatches.Count > 0)
+        {
+            OnSelectRayColor(raySwatchColors[0], raySwatches[0]);
+        }
+
+        if (hapticsSlider != null)
+        {
+            hapticsSlider.SetLabel($"Haptics: {hapticLabels[hapticsLevelIndex]}");
+        }
 
         AttachToHand();
         UpdateLabels();
@@ -239,13 +300,13 @@ public class HandMenuController : MonoBehaviour
         return rect;
     }
 
-    private void CreateHeader(RectTransform parent, string text)
+    private void CreateHeader(RectTransform parent, string text, float yOffset)
     {
         GameObject headerObj = new GameObject("Header");
         headerObj.transform.SetParent(parent, false);
         Text headerText = headerObj.AddComponent<Text>();
         headerText.text = text;
-        headerText.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
+        headerText.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
         headerText.color = new Color(0.92f, 0.92f, 0.92f, 1f);
         headerText.alignment = TextAnchor.MiddleLeft;
         headerText.fontSize = 20;
@@ -255,7 +316,7 @@ public class HandMenuController : MonoBehaviour
         rect.anchorMax = new Vector2(1f, 1f);
         rect.pivot = new Vector2(0.5f, 1f);
         rect.sizeDelta = new Vector2(panelSize.x - 24f, headerHeight);
-        rect.anchoredPosition = new Vector2(12f, -8f);
+        rect.anchoredPosition = new Vector2(12f, yOffset);
     }
 
     private MenuButton CreateButton(RectTransform parent, string label, float yOffset)
@@ -277,7 +338,7 @@ public class HandMenuController : MonoBehaviour
         textObj.transform.SetParent(buttonObj.transform, false);
         Text text = textObj.AddComponent<Text>();
         text.text = label;
-        text.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
+        text.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
         text.color = new Color(0.95f, 0.95f, 0.95f, 1f);
         text.alignment = TextAnchor.MiddleLeft;
         text.fontSize = 18;
@@ -295,6 +356,165 @@ public class HandMenuController : MonoBehaviour
         MenuButton menuButton = buttonObj.AddComponent<MenuButton>();
         menuButton.Initialize(button, image, text);
         return menuButton;
+    }
+
+    private MenuSlider CreateHapticsSlider(RectTransform parent, float yOffset)
+    {
+        GameObject sliderRoot = new GameObject("HapticsSlider");
+        sliderRoot.transform.SetParent(parent, false);
+
+        RectTransform rootRect = sliderRoot.AddComponent<RectTransform>();
+        rootRect.anchorMin = new Vector2(0.5f, 1f);
+        rootRect.anchorMax = new Vector2(0.5f, 1f);
+        rootRect.pivot = new Vector2(0.5f, 1f);
+        rootRect.sizeDelta = new Vector2(panelSize.x - 24f, buttonHeight);
+        rootRect.anchoredPosition = new Vector2(0f, yOffset);
+
+        BoxCollider collider = sliderRoot.AddComponent<BoxCollider>();
+        collider.isTrigger = true;
+        collider.size = new Vector3(rootRect.sizeDelta.x, rootRect.sizeDelta.y, 2f);
+
+        GameObject labelObj = new GameObject("Label");
+        labelObj.transform.SetParent(sliderRoot.transform, false);
+        Text label = labelObj.AddComponent<Text>();
+        label.text = "Haptics";
+        label.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        label.color = new Color(0.95f, 0.95f, 0.95f, 1f);
+        label.alignment = TextAnchor.MiddleLeft;
+        label.fontSize = 16;
+
+        RectTransform labelRect = labelObj.GetComponent<RectTransform>();
+        labelRect.anchorMin = new Vector2(0f, 0f);
+        labelRect.anchorMax = new Vector2(0f, 1f);
+        labelRect.pivot = new Vector2(0f, 0.5f);
+        labelRect.sizeDelta = new Vector2(110f, buttonHeight);
+        labelRect.anchoredPosition = new Vector2(12f, 0f);
+
+        GameObject sliderObj = new GameObject("Slider");
+        sliderObj.transform.SetParent(sliderRoot.transform, false);
+        Slider slider = sliderObj.AddComponent<Slider>();
+
+        RectTransform sliderRect = sliderObj.GetComponent<RectTransform>();
+        sliderRect.anchorMin = new Vector2(0f, 0f);
+        sliderRect.anchorMax = new Vector2(1f, 1f);
+        sliderRect.pivot = new Vector2(0f, 0.5f);
+        sliderRect.offsetMin = new Vector2(130f, 12f);
+        sliderRect.offsetMax = new Vector2(-12f, -12f);
+
+        GameObject bgObj = new GameObject("Background");
+        bgObj.transform.SetParent(sliderObj.transform, false);
+        Image bgImage = bgObj.AddComponent<Image>();
+        bgImage.color = new Color(0.18f, 0.18f, 0.2f, 0.9f);
+        RectTransform bgRect = bgObj.GetComponent<RectTransform>();
+        bgRect.anchorMin = new Vector2(0f, 0.5f);
+        bgRect.anchorMax = new Vector2(1f, 0.5f);
+        bgRect.sizeDelta = new Vector2(0f, 8f);
+        bgRect.anchoredPosition = Vector2.zero;
+
+        GameObject fillArea = new GameObject("Fill Area");
+        fillArea.transform.SetParent(sliderObj.transform, false);
+        RectTransform fillAreaRect = fillArea.AddComponent<RectTransform>();
+        fillAreaRect.anchorMin = new Vector2(0f, 0.5f);
+        fillAreaRect.anchorMax = new Vector2(1f, 0.5f);
+        fillAreaRect.sizeDelta = new Vector2(-10f, 8f);
+        fillAreaRect.anchoredPosition = Vector2.zero;
+
+        GameObject fillObj = new GameObject("Fill");
+        fillObj.transform.SetParent(fillArea.transform, false);
+        Image fillImage = fillObj.AddComponent<Image>();
+        fillImage.color = new Color(0.98f, 0.6f, 0.28f, 0.9f);
+        RectTransform fillRect = fillObj.GetComponent<RectTransform>();
+        fillRect.anchorMin = new Vector2(0f, 0f);
+        fillRect.anchorMax = new Vector2(1f, 1f);
+        fillRect.sizeDelta = Vector2.zero;
+
+        GameObject handleArea = new GameObject("Handle Slide Area");
+        handleArea.transform.SetParent(sliderObj.transform, false);
+        RectTransform handleAreaRect = handleArea.AddComponent<RectTransform>();
+        handleAreaRect.anchorMin = new Vector2(0f, 0f);
+        handleAreaRect.anchorMax = new Vector2(1f, 1f);
+        handleAreaRect.sizeDelta = Vector2.zero;
+
+        GameObject handleObj = new GameObject("Handle");
+        handleObj.transform.SetParent(handleArea.transform, false);
+        Image handleImage = handleObj.AddComponent<Image>();
+        handleImage.color = new Color(0.96f, 0.96f, 0.96f, 1f);
+        RectTransform handleRect = handleObj.GetComponent<RectTransform>();
+        handleRect.sizeDelta = new Vector2(18f, 18f);
+        handleRect.anchorMin = new Vector2(0f, 0.5f);
+        handleRect.anchorMax = new Vector2(0f, 0.5f);
+        handleRect.anchoredPosition = Vector2.zero;
+
+        slider.targetGraphic = handleImage;
+        slider.handleRect = handleRect;
+        slider.fillRect = fillRect;
+        slider.direction = Slider.Direction.LeftToRight;
+        slider.minValue = 0;
+        slider.maxValue = hapticLevels.Length - 1;
+        slider.wholeNumbers = true;
+        slider.value = hapticsLevelIndex;
+        slider.onValueChanged.AddListener(OnHapticsSliderChanged);
+
+        MenuSlider menuSlider = sliderRoot.AddComponent<MenuSlider>();
+        menuSlider.Initialize(slider, sliderRect, bgImage, label);
+        return menuSlider;
+    }
+
+    private float CreateColorSwatches(RectTransform parent, float startY)
+    {
+        raySwatches.Clear();
+        float contentWidth = panelSize.x - 24f;
+        float gridWidth = swatchColumns * swatchSize + (swatchColumns - 1) * swatchSpacing;
+        float xStart = -contentWidth * 0.5f + (contentWidth - gridWidth) * 0.5f + swatchSize * 0.5f;
+        float y = startY - swatchSize * 0.5f;
+
+        int index = 0;
+        int rows = Mathf.CeilToInt(raySwatchColors.Length / (float)swatchColumns);
+        for (int row = 0; row < rows; row++)
+        {
+            float x = xStart;
+            for (int col = 0; col < swatchColumns; col++)
+            {
+                if (index >= raySwatchColors.Length)
+                {
+                    break;
+                }
+
+                Color color = raySwatchColors[index++];
+                MenuSwatch swatch = CreateSwatch(parent, color, new Vector2(x, y));
+                raySwatches.Add(swatch);
+                x += swatchSize + swatchSpacing;
+            }
+
+            y -= swatchSize + swatchSpacing;
+        }
+
+        return y - buttonSpacing;
+    }
+
+    private MenuSwatch CreateSwatch(RectTransform parent, Color color, Vector2 anchoredPosition)
+    {
+        GameObject swatchObj = new GameObject("Swatch");
+        swatchObj.transform.SetParent(parent, false);
+
+        Image image = swatchObj.AddComponent<Image>();
+        Button button = swatchObj.AddComponent<Button>();
+
+        RectTransform rect = swatchObj.GetComponent<RectTransform>();
+        rect.anchorMin = new Vector2(0.5f, 1f);
+        rect.anchorMax = new Vector2(0.5f, 1f);
+        rect.pivot = new Vector2(0.5f, 0.5f);
+        rect.sizeDelta = new Vector2(swatchSize, swatchSize);
+        rect.anchoredPosition = anchoredPosition;
+
+        BoxCollider collider = swatchObj.AddComponent<BoxCollider>();
+        collider.isTrigger = true;
+        collider.size = new Vector3(rect.sizeDelta.x, rect.sizeDelta.y, 2f);
+
+        MenuSwatch menuSwatch = swatchObj.AddComponent<MenuSwatch>();
+        menuSwatch.Initialize(button, image, color);
+        button.onClick.AddListener(() => OnSelectRayColor(color, menuSwatch));
+        return menuSwatch;
     }
 
     private void UpdateMenuToggle(bool pinching)
@@ -339,7 +559,9 @@ public class HandMenuController : MonoBehaviour
         Vector3 pokePosition = GetPokePosition();
         Collider[] hits = Physics.OverlapSphere(pokePosition, pokeRadius, pokeMask, QueryTriggerInteraction.Collide);
 
-        MenuButton hovered = null;
+        MenuButton hoveredButton = null;
+        MenuSwatch hoveredSwatch = null;
+        MenuSlider hoveredSlider = null;
         foreach (Collider hit in hits)
         {
             if (hit == null)
@@ -347,29 +569,68 @@ public class HandMenuController : MonoBehaviour
                 continue;
             }
 
-            MenuButton button = hit.GetComponent<MenuButton>();
-            if (button != null)
+            if (hoveredSlider == null)
             {
-                hovered = button;
+                hoveredSlider = hit.GetComponent<MenuSlider>();
+            }
+
+            if (hoveredSwatch == null)
+            {
+                hoveredSwatch = hit.GetComponent<MenuSwatch>();
+            }
+
+            if (hoveredButton == null)
+            {
+                hoveredButton = hit.GetComponent<MenuButton>();
+            }
+
+            if (hoveredSlider != null || hoveredButton != null || hoveredSwatch != null)
+            {
                 break;
             }
         }
 
-        recenterButton.SetHover(hovered == recenterButton);
-        nightButton.SetHover(hovered == nightButton);
-        passthroughButton.SetHover(hovered == passthroughButton);
+        recenterButton.SetHover(hoveredButton == recenterButton);
+        nightButton.SetHover(hoveredButton == nightButton);
+        passthroughButton.SetHover(hoveredButton == passthroughButton);
+        if (hapticsSlider != null)
+        {
+            hapticsSlider.SetHover(hoveredSlider == hapticsSlider);
+        }
+        foreach (MenuSwatch swatch in raySwatches)
+        {
+            swatch.SetHover(hoveredSwatch == swatch);
+        }
 
-        bool touching = hovered != null;
+        bool touching = hoveredButton != null || hoveredSwatch != null || hoveredSlider != null;
+        if (hoveredSlider != null && (touchToSelect || pinching))
+        {
+            hoveredSlider.UpdateWithPoke(pokePosition);
+        }
         if (touchToSelect)
         {
             if (touching && !wasTouching)
             {
-                hovered.Press();
+                if (hoveredButton != null)
+                {
+                    hoveredButton.Press();
+                }
+                else if (hoveredSwatch != null)
+                {
+                    hoveredSwatch.Press();
+                }
             }
         }
         else if (touching && pinching && !wasPinching)
         {
-            hovered.Press();
+            if (hoveredButton != null)
+            {
+                hoveredButton.Press();
+            }
+            else if (hoveredSwatch != null)
+            {
+                hoveredSwatch.Press();
+            }
         }
 
         wasTouching = touching;
@@ -437,6 +698,8 @@ public class HandMenuController : MonoBehaviour
         {
             layer.enabled = enabled;
         }
+
+        ApplySkyboxState(!enabled);
     }
 
     private bool GetPassthroughState()
@@ -454,6 +717,52 @@ public class HandMenuController : MonoBehaviour
         return false;
     }
 
+    private void ApplySkyboxState(bool useSkybox)
+    {
+        if (useSkybox && defaultSkybox != null)
+        {
+            RenderSettings.skybox = defaultSkybox;
+        }
+
+        if (mainCamera == null)
+        {
+            mainCamera = Camera.main;
+        }
+
+        if (mainCamera != null)
+        {
+            mainCamera.clearFlags = useSkybox ? CameraClearFlags.Skybox : CameraClearFlags.SolidColor;
+            if (!useSkybox)
+            {
+                mainCamera.backgroundColor = new Color(0f, 0f, 0f, 0f);
+            }
+        }
+    }
+
+    private void OnHapticsSliderChanged(float value)
+    {
+        int index = Mathf.Clamp(Mathf.RoundToInt(value), 0, hapticLevels.Length - 1);
+        hapticsLevelIndex = index;
+        if (stick != null)
+        {
+            stick.SetHapticStrength(hapticLevels[hapticsLevelIndex]);
+        }
+        UpdateLabels();
+    }
+
+    private void OnSelectRayColor(Color color, MenuSwatch swatch)
+    {
+        if (stick != null)
+        {
+            stick.SetRayColor(color);
+        }
+
+        foreach (MenuSwatch sw in raySwatches)
+        {
+            sw.SetSelected(sw == swatch);
+        }
+    }
+
     private void UpdateLabels()
     {
         if (nightButton != null)
@@ -464,6 +773,11 @@ public class HandMenuController : MonoBehaviour
         if (passthroughButton != null)
         {
             passthroughButton.SetLabel($"Passthrough: {(passthroughEnabled ? "On" : "Off")}");
+        }
+
+        if (hapticsSlider != null)
+        {
+            hapticsSlider.SetLabel($"Haptics: {hapticLabels[hapticsLevelIndex]}");
         }
     }
 }

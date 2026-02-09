@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.Serialization;
 using UnityEngine.XR;
 
 public class VirtualStickController : MonoBehaviour
@@ -26,9 +27,9 @@ public class VirtualStickController : MonoBehaviour
     [SerializeField] private bool useLeftStickForLength = true;
     [SerializeField] private Vector3 lengthScaleAxis = new Vector3(0f, 0f, 1f);
 
-    [Header("Rotation")]
-    [SerializeField] private float rotationSpeed = 90f;
-    [SerializeField] private float rotationDeadzone = 0.2f;
+    [Header("Input")]
+    [FormerlySerializedAs("rotationDeadzone")]
+    [SerializeField] private float inputDeadzone = 0.2f;
 
     [Header("Ray Visual")]
     [SerializeField] private LineRenderer rayLine;
@@ -38,16 +39,18 @@ public class VirtualStickController : MonoBehaviour
     [SerializeField] private AnimationCurve rayWidthCurve;
     [SerializeField] private float rayStartWidth = 0.008f;
     [SerializeField] private float rayEndWidth = 0.003f;
+    [SerializeField] private Color rayBaseColor = new Color(1f, 0.55f, 0.2f);
+    [SerializeField, Range(0f, 1f)] private float rayStartAlpha = 0.9f;
+    [SerializeField, Range(0f, 1f)] private float rayEndAlpha = 0.35f;
+    [SerializeField, Range(0f, 1f)] private float rayStartHighlight = 0.2f;
+    [SerializeField, Range(0f, 1f)] private float rayEndShadow = 0.1f;
 
     [Header("Haptics")]
     [SerializeField, Range(0f, 1f)] private float hapticStrength = 0.8f;
-    [SerializeField, Range(0.01f, 0.5f)] private float hapticStrengthStep = 0.1f;
-    [SerializeField] private HapticPulse rotationHaptics = new HapticPulse(0.25f, 0.03f, 0.05f);
-    [SerializeField] private HapticPulse lengthHaptics = new HapticPulse(0.2f, 0.03f, 0.1f);
-    [SerializeField] private HapticPulse rayHoverHaptics = new HapticPulse(0.5f, 0.06f, 0.12f);
-    [SerializeField] private HapticPulse selectHaptics = new HapticPulse(0.7f, 0.08f, 0.12f);
-    [SerializeField] private HapticPulse touchHaptics = new HapticPulse(0.55f, 0.05f, 0.08f);
-    [SerializeField] private bool enableRayHoverHaptics = false;
+    [SerializeField] private HapticPulse rayHoverHaptics = new HapticPulse(0.9f, 0.02f, 0.1f);
+    [SerializeField] private HapticPulse contactHaptics = new HapticPulse(0.6f, 0.05f, 0.12f);
+    [SerializeField] private HapticPulse selectHaptics = new HapticPulse(0.7f, 0.06f, 0.12f);
+    [SerializeField] private bool enableRayHoverHaptics = true;
     [SerializeField] private bool enableRayContactHaptics = true;
     [SerializeField, Range(0.01f, 0.5f)] private float rayContactDistance = 0.06f;
     [SerializeField] private LayerMask touchMask = ~0;
@@ -55,7 +58,7 @@ public class VirtualStickController : MonoBehaviour
     [Header("Recenter")]
     [SerializeField] private bool enableRecenter = true;
     [SerializeField, Range(0.1f, 2f)] private float recenterHoldTime = 0.5f;
-    [SerializeField] private HapticPulse recenterHaptics = new HapticPulse(0.8f, 0.08f, 0.1f);
+    [SerializeField] private HapticPulse recenterHaptics = new HapticPulse(0.2f, 0.04f, 0.12f);
 
     [Header("Floor Touch (Headset Tracking)")]
     [SerializeField] private bool useHeadsetFloorTouch = true;
@@ -64,7 +67,7 @@ public class VirtualStickController : MonoBehaviour
     [SerializeField, Range(0.5f, 5f)] private float floorProbeDistance = 3f;
     [SerializeField, Range(0f, 0.2f)] private float floorContactTolerance = 0.02f;
     [SerializeField] private bool alignRayOriginToLength = true;
-    [SerializeField] private HapticPulse floorTouchHaptics = new HapticPulse(0.6f, 0.05f, 0.08f);
+    [SerializeField] private HapticPulse floorTouchHaptics = new HapticPulse(0.45f, 0.05f, 0.1f);
 
     [System.Serializable]
     public struct HapticPulse
@@ -83,16 +86,12 @@ public class VirtualStickController : MonoBehaviour
 
     private InputDevice rightDevice;
     private InputDevice leftDevice;
-    private float nextRotationHapticTime;
-    private float nextLengthHapticTime;
     private float nextTouchHapticTime;
     private float nextRayContactHapticTime;
     private float recenterPressStart = -1f;
     private bool recenterTriggered;
     private float nextFloorHapticTime;
     private bool lastSelectButton;
-    private bool lastPrimaryButton;
-    private bool lastSecondaryButton;
     private RaySelectable currentHover;
     private RaySelectable currentSelection;
     private Vector3 initialStickScale;
@@ -140,11 +139,9 @@ public class VirtualStickController : MonoBehaviour
         }
 
         UpdateDevices();
-        UpdateStickRotation();
         UpdateStickLength();
         UpdateRaycast();
         UpdateFloorTouchFromHeadset();
-        UpdateHapticStrength();
         UpdateRecenter();
     }
 
@@ -183,22 +180,7 @@ public class VirtualStickController : MonoBehaviour
         rayLine.startWidth = rayStartWidth;
         rayLine.endWidth = rayEndWidth;
 
-        if (rayGradient.colorKeys.Length == 0)
-        {
-            GradientColorKey[] colors =
-            {
-                new GradientColorKey(new Color(0.98f, 0.92f, 0.75f), 0f),
-                new GradientColorKey(new Color(1f, 0.55f, 0.2f), 1f)
-            };
-            GradientAlphaKey[] alphas =
-            {
-                new GradientAlphaKey(0.9f, 0f),
-                new GradientAlphaKey(0.4f, 1f)
-            };
-            rayGradient.SetKeys(colors, alphas);
-        }
-
-        rayLine.colorGradient = rayGradient;
+        ApplyRayColor(rayBaseColor);
 
         if (rayWidthCurve == null || rayWidthCurve.length == 0)
         {
@@ -224,32 +206,10 @@ public class VirtualStickController : MonoBehaviour
         }
     }
 
-    private void UpdateStickRotation()
-    {
-        Vector2 rotationAxis = GetRotationAxis();
-        float magnitude = rotationAxis.magnitude;
-        if (magnitude < rotationDeadzone)
-        {
-            return;
-        }
-
-        float yaw = rotationAxis.x * rotationSpeed * Time.deltaTime;
-        float pitch = -rotationAxis.y * rotationSpeed * Time.deltaTime;
-
-        stickRoot.Rotate(Vector3.up, yaw, Space.Self);
-        stickRoot.Rotate(Vector3.right, pitch, Space.Self);
-
-        if (Time.time >= nextRotationHapticTime)
-        {
-            SendHapticPulse(GetPrimaryDevice(), rotationHaptics);
-            nextRotationHapticTime = Time.time + rotationHaptics.repeatRate;
-        }
-    }
-
     private void UpdateStickLength()
     {
         float lengthInput = GetLengthAxis();
-        if (Mathf.Abs(lengthInput) < rotationDeadzone)
+        if (Mathf.Abs(lengthInput) < inputDeadzone)
         {
             return;
         }
@@ -261,12 +221,6 @@ public class VirtualStickController : MonoBehaviour
         );
 
         ApplyStickLength();
-
-        if (Time.time >= nextLengthHapticTime)
-        {
-            SendHapticPulse(GetPrimaryDevice(), lengthHaptics);
-            nextLengthHapticTime = Time.time + lengthHaptics.repeatRate;
-        }
     }
 
     private void ApplyStickLength()
@@ -362,33 +316,6 @@ public class VirtualStickController : MonoBehaviour
             currentSelection.SetSelected(true);
             SendHapticPulse(GetPrimaryDevice(), selectHaptics);
         }
-    }
-
-    private void UpdateHapticStrength()
-    {
-        InputDevice primary = GetPrimaryDevice();
-        if (!primary.isValid)
-        {
-            return;
-        }
-
-        bool primaryButton = false;
-        bool secondaryButton = false;
-        primary.TryGetFeatureValue(CommonUsages.primaryButton, out primaryButton);
-        primary.TryGetFeatureValue(CommonUsages.secondaryButton, out secondaryButton);
-
-        if (primaryButton && !lastPrimaryButton)
-        {
-            hapticStrength = Mathf.Clamp01(hapticStrength + hapticStrengthStep);
-        }
-
-        if (secondaryButton && !lastSecondaryButton)
-        {
-            hapticStrength = Mathf.Clamp01(hapticStrength - hapticStrengthStep);
-        }
-
-        lastPrimaryButton = primaryButton;
-        lastSecondaryButton = secondaryButton;
     }
 
     private void UpdateRecenter()
@@ -488,23 +415,6 @@ public class VirtualStickController : MonoBehaviour
 
         SendHapticPulse(GetPrimaryDevice(), floorTouchHaptics);
         nextFloorHapticTime = Time.time + floorTouchHaptics.repeatRate;
-    }
-
-    private Vector2 GetRotationAxis()
-    {
-        InputDevice primary = GetPrimaryDevice();
-        if (!primary.isValid)
-        {
-            return Vector2.zero;
-        }
-
-        Vector2 axis;
-        if (primary.TryGetFeatureValue(CommonUsages.primary2DAxis, out axis))
-        {
-            return axis;
-        }
-
-        return Vector2.zero;
     }
 
     private float GetLengthAxis()
@@ -678,8 +588,8 @@ public class VirtualStickController : MonoBehaviour
             return;
         }
 
-        SendHapticPulse(GetPrimaryDevice(), touchHaptics);
-        nextTouchHapticTime = Time.time + touchHaptics.repeatRate;
+        SendHapticPulse(GetPrimaryDevice(), contactHaptics);
+        nextTouchHapticTime = Time.time + contactHaptics.repeatRate;
     }
 
     private void TrySendRayContactHaptics(float hitDistance)
@@ -694,7 +604,55 @@ public class VirtualStickController : MonoBehaviour
             return;
         }
 
-        SendHapticPulse(GetPrimaryDevice(), touchHaptics);
-        nextRayContactHapticTime = Time.time + touchHaptics.repeatRate;
+        SendHapticPulse(GetPrimaryDevice(), contactHaptics);
+        nextRayContactHapticTime = Time.time + contactHaptics.repeatRate;
+    }
+
+    public void SetHapticStrength(float strength)
+    {
+        hapticStrength = Mathf.Clamp01(strength);
+    }
+
+    public float GetHapticStrength()
+    {
+        return hapticStrength;
+    }
+
+    public void SetRayColor(Color color)
+    {
+        rayBaseColor = color;
+        ApplyRayColor(rayBaseColor);
+    }
+
+    public Color GetRayColor()
+    {
+        return rayBaseColor;
+    }
+
+    private void ApplyRayColor(Color baseColor)
+    {
+        if (rayGradient == null)
+        {
+            rayGradient = new Gradient();
+        }
+
+        Color startColor = Color.Lerp(baseColor, Color.white, rayStartHighlight);
+        Color endColor = Color.Lerp(baseColor, Color.black, rayEndShadow);
+        GradientColorKey[] colors =
+        {
+            new GradientColorKey(startColor, 0f),
+            new GradientColorKey(endColor, 1f)
+        };
+        GradientAlphaKey[] alphas =
+        {
+            new GradientAlphaKey(rayStartAlpha, 0f),
+            new GradientAlphaKey(rayEndAlpha, 1f)
+        };
+        rayGradient.SetKeys(colors, alphas);
+
+        if (rayLine != null)
+        {
+            rayLine.colorGradient = rayGradient;
+        }
     }
 }
