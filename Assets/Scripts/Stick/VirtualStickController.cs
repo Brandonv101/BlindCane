@@ -48,7 +48,14 @@ public class VirtualStickController : MonoBehaviour
     [SerializeField] private HapticPulse selectHaptics = new HapticPulse(0.7f, 0.08f, 0.12f);
     [SerializeField] private HapticPulse touchHaptics = new HapticPulse(0.55f, 0.05f, 0.08f);
     [SerializeField] private bool enableRayHoverHaptics = false;
+    [SerializeField] private bool enableRayContactHaptics = true;
+    [SerializeField, Range(0.01f, 0.5f)] private float rayContactDistance = 0.06f;
     [SerializeField] private LayerMask touchMask = ~0;
+
+    [Header("Recenter")]
+    [SerializeField] private bool enableRecenter = true;
+    [SerializeField, Range(0.1f, 2f)] private float recenterHoldTime = 0.5f;
+    [SerializeField] private HapticPulse recenterHaptics = new HapticPulse(0.8f, 0.08f, 0.1f);
 
     [Header("Floor Touch (Headset Tracking)")]
     [SerializeField] private bool useHeadsetFloorTouch = true;
@@ -79,6 +86,9 @@ public class VirtualStickController : MonoBehaviour
     private float nextRotationHapticTime;
     private float nextLengthHapticTime;
     private float nextTouchHapticTime;
+    private float nextRayContactHapticTime;
+    private float recenterPressStart = -1f;
+    private bool recenterTriggered;
     private float nextFloorHapticTime;
     private bool lastSelectButton;
     private bool lastPrimaryButton;
@@ -119,6 +129,27 @@ public class VirtualStickController : MonoBehaviour
 
     private void Start()
     {
+        TryAttachToController();
+    }
+
+    private void Update()
+    {
+        if (controllerAnchor == null)
+        {
+            TryAttachToController();
+        }
+
+        UpdateDevices();
+        UpdateStickRotation();
+        UpdateStickLength();
+        UpdateRaycast();
+        UpdateFloorTouchFromHeadset();
+        UpdateHapticStrength();
+        UpdateRecenter();
+    }
+
+    private void TryAttachToController()
+    {
         if (controllerAnchor == null)
         {
             controllerAnchor = FindControllerAnchor(stickHand);
@@ -134,16 +165,6 @@ public class VirtualStickController : MonoBehaviour
         {
             Debug.LogWarning("VirtualStickController: Controller anchor not found. Assign one manually.");
         }
-    }
-
-    private void Update()
-    {
-        UpdateDevices();
-        UpdateStickRotation();
-        UpdateStickLength();
-        UpdateRaycast();
-        UpdateFloorTouchFromHeadset();
-        UpdateHapticStrength();
     }
 
     private void SetupRayVisual()
@@ -314,6 +335,11 @@ public class VirtualStickController : MonoBehaviour
             }
         }
 
+        if (enableRayContactHaptics && hit)
+        {
+            TrySendRayContactHaptics(hitInfo.distance);
+        }
+
         bool selectPressed = GetSelectPressed();
         if (selectPressed && !lastSelectButton)
         {
@@ -363,6 +389,71 @@ public class VirtualStickController : MonoBehaviour
 
         lastPrimaryButton = primaryButton;
         lastSecondaryButton = secondaryButton;
+    }
+
+    private void UpdateRecenter()
+    {
+        if (!enableRecenter)
+        {
+            return;
+        }
+
+        InputDevice primary = GetPrimaryDevice();
+        if (!primary.isValid)
+        {
+            return;
+        }
+
+        bool secondaryButton = false;
+        primary.TryGetFeatureValue(CommonUsages.secondaryButton, out secondaryButton);
+
+        if (secondaryButton)
+        {
+            if (recenterPressStart < 0f)
+            {
+                recenterPressStart = Time.time;
+                recenterTriggered = false;
+            }
+
+            if (!recenterTriggered && Time.time - recenterPressStart >= recenterHoldTime)
+            {
+                RecenterStick();
+                SendHapticPulse(primary, recenterHaptics);
+                recenterTriggered = true;
+            }
+        }
+        else
+        {
+            recenterPressStart = -1f;
+            recenterTriggered = false;
+        }
+    }
+
+    private void RecenterStick()
+    {
+        if (stickRoot == null)
+        {
+            return;
+        }
+
+        if (controllerAnchor == null)
+        {
+            controllerAnchor = FindControllerAnchor(stickHand);
+        }
+
+        if (controllerAnchor != null)
+        {
+            stickRoot.SetParent(controllerAnchor, false);
+        }
+
+        stickRoot.localPosition = stickLocalPositionOffset;
+        stickRoot.localRotation = Quaternion.Euler(stickLocalRotationOffset);
+        ApplyStickLength();
+    }
+
+    public void RecenterNow()
+    {
+        RecenterStick();
     }
 
     private void UpdateFloorTouchFromHeadset()
@@ -500,12 +591,44 @@ public class VirtualStickController : MonoBehaviour
         };
 
         string[] targets = handedness == Handedness.Right ? rightNames : leftNames;
+        Transform root = headset != null ? headset.root : null;
+        if (root != null)
+        {
+            Transform match = FindAnchorUnderRoot(root, targets);
+            if (match != null)
+            {
+                return match;
+            }
+        }
+
         foreach (string target in targets)
         {
             GameObject found = GameObject.Find(target);
             if (found != null)
             {
                 return found.transform;
+            }
+        }
+
+        return null;
+    }
+
+    private Transform FindAnchorUnderRoot(Transform root, string[] targets)
+    {
+        if (root == null)
+        {
+            return null;
+        }
+
+        Transform[] children = root.GetComponentsInChildren<Transform>(true);
+        foreach (string target in targets)
+        {
+            foreach (Transform child in children)
+            {
+                if (child.name == target)
+                {
+                    return child;
+                }
             }
         }
 
@@ -557,5 +680,21 @@ public class VirtualStickController : MonoBehaviour
 
         SendHapticPulse(GetPrimaryDevice(), touchHaptics);
         nextTouchHapticTime = Time.time + touchHaptics.repeatRate;
+    }
+
+    private void TrySendRayContactHaptics(float hitDistance)
+    {
+        if (hitDistance > rayContactDistance)
+        {
+            return;
+        }
+
+        if (Time.time < nextRayContactHapticTime)
+        {
+            return;
+        }
+
+        SendHapticPulse(GetPrimaryDevice(), touchHaptics);
+        nextRayContactHapticTime = Time.time + touchHaptics.repeatRate;
     }
 }
