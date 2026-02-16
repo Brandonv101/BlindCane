@@ -10,6 +10,42 @@ public class VirtualStickController : MonoBehaviour
         Right
     }
 
+    [System.Serializable]
+    public struct HapticPulse
+    {
+        [Range(0f, 1f)] public float amplitude;
+        [Range(0.01f, 1f)] public float duration;
+        [Range(0.01f, 1f)] public float repeatRate;
+
+        public HapticPulse(float amplitude, float duration, float repeatRate)
+        {
+            this.amplitude = amplitude;
+            this.duration = duration;
+            this.repeatRate = repeatRate;
+        }
+    }
+
+    [System.Serializable]
+    public struct TipProfile
+    {
+        public string name;
+        [Range(0.3f, 2f)] public float sizeMultiplier;
+        [Range(0.01f, 0.5f)] public float contactDistance;
+        public HapticPulse hoverPulse;
+        public HapticPulse contactPulse;
+        public HapticPulse selectPulse;
+
+        public TipProfile(string name, float sizeMultiplier, float contactDistance, HapticPulse hoverPulse, HapticPulse contactPulse, HapticPulse selectPulse)
+        {
+            this.name = name;
+            this.sizeMultiplier = sizeMultiplier;
+            this.contactDistance = contactDistance;
+            this.hoverPulse = hoverPulse;
+            this.contactPulse = contactPulse;
+            this.selectPulse = selectPulse;
+        }
+    }
+
     [Header("Rig")]
     [SerializeField] private Handedness stickHand = Handedness.Right;
     [SerializeField] private Transform controllerAnchor;
@@ -31,6 +67,13 @@ public class VirtualStickController : MonoBehaviour
     [FormerlySerializedAs("rotationDeadzone")]
     [SerializeField] private float inputDeadzone = 0.2f;
 
+    [Header("Selection Rotation")]
+    [SerializeField] private bool enableSelectionRotation = true;
+    [SerializeField, Range(10f, 360f)] private float rotationDegreesPerSecond = 110f;
+    [SerializeField] private bool invertVerticalRotation = true;
+    [SerializeField, Range(0.1f, 1f)] private float minimumRotationHapticScale = 0.25f;
+    [SerializeField] private HapticPulse rotationHaptics = new HapticPulse(0.35f, 0.02f, 0.05f);
+
     [Header("Ray Visual")]
     [SerializeField] private LineRenderer rayLine;
     [SerializeField] private LayerMask raycastMask = ~0;
@@ -43,10 +86,13 @@ public class VirtualStickController : MonoBehaviour
     [SerializeField, Range(0f, 1f)] private float rayStartAlpha = 0.9f;
     [SerializeField, Range(0f, 1f)] private float rayEndAlpha = 0.35f;
     [SerializeField, Range(0f, 1f)] private float rayStartHighlight = 0.2f;
+    [SerializeField, Range(0f, 1f)] private float rayMidHighlight = 0.3f;
     [SerializeField, Range(0f, 1f)] private float rayEndShadow = 0.1f;
+    [SerializeField, Range(0f, 1f)] private float rayHitBoost = 0.3f;
 
     [Header("Haptics")]
     [SerializeField, Range(0f, 1f)] private float hapticStrength = 0.8f;
+    [SerializeField, Range(0.2f, 2f)] private float motorStrengthMultiplier = 1f;
     [SerializeField] private HapticPulse rayHoverHaptics = new HapticPulse(0.9f, 0.02f, 0.1f);
     [SerializeField] private HapticPulse contactHaptics = new HapticPulse(0.6f, 0.05f, 0.12f);
     [SerializeField] private HapticPulse selectHaptics = new HapticPulse(0.7f, 0.06f, 0.12f);
@@ -54,6 +100,16 @@ public class VirtualStickController : MonoBehaviour
     [SerializeField] private bool enableRayContactHaptics = true;
     [SerializeField, Range(0.01f, 0.5f)] private float rayContactDistance = 0.06f;
     [SerializeField] private LayerMask touchMask = ~0;
+    [SerializeField, Range(0.2f, 2f)] private float quest2MotorScale = 1f;
+    [SerializeField, Range(0.2f, 2f)] private float quest3MotorScale = 1f;
+    [SerializeField, Range(0.2f, 2f)] private float questProMotorScale = 1f;
+    [SerializeField, Range(0.2f, 2f)] private float defaultQuestMotorScale = 1f;
+
+    [Header("Tip Profile")]
+    [SerializeField] private Transform stickTip;
+    [SerializeField] private TipProfile[] tipProfiles;
+    [SerializeField] private int tipProfileIndex = 1;
+    [SerializeField] private HapticPulse tipProfileChangeHaptics = new HapticPulse(0.4f, 0.03f, 0.08f);
 
     [Header("Recenter")]
     [SerializeField] private bool enableRecenter = true;
@@ -69,21 +125,6 @@ public class VirtualStickController : MonoBehaviour
     [SerializeField] private bool alignRayOriginToLength = true;
     [SerializeField] private HapticPulse floorTouchHaptics = new HapticPulse(0.45f, 0.05f, 0.1f);
 
-    [System.Serializable]
-    public struct HapticPulse
-    {
-        [Range(0f, 1f)] public float amplitude;
-        [Range(0.01f, 1f)] public float duration;
-        [Range(0.01f, 1f)] public float repeatRate;
-
-        public HapticPulse(float amplitude, float duration, float repeatRate)
-        {
-            this.amplitude = amplitude;
-            this.duration = duration;
-            this.repeatRate = repeatRate;
-        }
-    }
-
     private InputDevice rightDevice;
     private InputDevice leftDevice;
     private float nextTouchHapticTime;
@@ -91,10 +132,13 @@ public class VirtualStickController : MonoBehaviour
     private float recenterPressStart = -1f;
     private bool recenterTriggered;
     private float nextFloorHapticTime;
+    private float nextRotationHapticTime;
     private bool lastSelectButton;
     private RaySelectable currentHover;
     private RaySelectable currentSelection;
     private Vector3 initialStickScale;
+    private Vector3 initialTipScale = Vector3.one;
+    private float currentRayHitBlend;
 
     private void Awake()
     {
@@ -120,9 +164,12 @@ public class VirtualStickController : MonoBehaviour
             rayLine = GetComponent<LineRenderer>();
         }
 
+        ResolveTip();
+        EnsureTipProfiles();
         TryResolveHeadset();
         initialStickScale = stickModel.localScale;
         SetupRayVisual();
+        ApplyTipProfile(tipProfileIndex, false);
         ApplyStickLength();
     }
 
@@ -141,6 +188,7 @@ public class VirtualStickController : MonoBehaviour
         UpdateDevices();
         UpdateStickLength();
         UpdateRaycast();
+        UpdateSelectionRotation();
         UpdateFloorTouchFromHeadset();
         UpdateRecenter();
     }
@@ -180,7 +228,7 @@ public class VirtualStickController : MonoBehaviour
         rayLine.startWidth = rayStartWidth;
         rayLine.endWidth = rayEndWidth;
 
-        ApplyRayColor(rayBaseColor);
+        ApplyRayColor(rayBaseColor, 0f);
 
         if (rayWidthCurve == null || rayWidthCurve.length == 0)
         {
@@ -273,6 +321,7 @@ public class VirtualStickController : MonoBehaviour
 
         rayLine.SetPosition(0, origin);
         rayLine.SetPosition(1, endPoint);
+        UpdateRayVisualForHit(hit, hit ? hitInfo.distance : maxRayDistance);
 
         RaySelectable hover = null;
         if (hit)
@@ -300,6 +349,43 @@ public class VirtualStickController : MonoBehaviour
             ToggleSelection();
         }
         lastSelectButton = selectPressed;
+    }
+
+    private void UpdateSelectionRotation()
+    {
+        if (!enableSelectionRotation || currentSelection == null)
+        {
+            return;
+        }
+
+        InputDevice primary = GetPrimaryDevice();
+        if (!primary.isValid)
+        {
+            return;
+        }
+
+        if (!primary.TryGetFeatureValue(CommonUsages.primary2DAxis, out Vector2 axis))
+        {
+            return;
+        }
+
+        float magnitude = axis.magnitude;
+        if (magnitude < inputDeadzone)
+        {
+            return;
+        }
+
+        float yawInput = axis.x;
+        float pitchInput = invertVerticalRotation ? -axis.y : axis.y;
+
+        Transform target = currentSelection.transform;
+        Vector3 yawAxis = headset != null ? headset.up : Vector3.up;
+        Vector3 pitchAxis = headset != null ? headset.right : Vector3.right;
+
+        target.Rotate(yawAxis, yawInput * rotationDegreesPerSecond * Time.deltaTime, Space.World);
+        target.Rotate(pitchAxis, pitchInput * rotationDegreesPerSecond * Time.deltaTime, Space.World);
+
+        TrySendRotationHaptics(magnitude);
     }
 
     private void ToggleSelection()
@@ -415,6 +501,45 @@ public class VirtualStickController : MonoBehaviour
 
         SendHapticPulse(GetPrimaryDevice(), floorTouchHaptics);
         nextFloorHapticTime = Time.time + floorTouchHaptics.repeatRate;
+    }
+
+    private void UpdateRayVisualForHit(bool hit, float hitDistance)
+    {
+        float hitBlend = 0f;
+        if (hit)
+        {
+            float normalizedDistance = Mathf.Clamp01(hitDistance / Mathf.Max(0.01f, maxRayDistance));
+            hitBlend = 1f - normalizedDistance;
+        }
+
+        if (Mathf.Abs(currentRayHitBlend - hitBlend) < 0.01f)
+        {
+            return;
+        }
+
+        currentRayHitBlend = hitBlend;
+        ApplyRayColor(rayBaseColor, currentRayHitBlend);
+
+        if (rayLine != null)
+        {
+            rayLine.widthMultiplier = Mathf.Lerp(1f, 1.14f, currentRayHitBlend);
+        }
+    }
+
+    private void TrySendRotationHaptics(float axisMagnitude)
+    {
+        if (Time.time < nextRotationHapticTime)
+        {
+            return;
+        }
+
+        float normalizedMagnitude = Mathf.InverseLerp(inputDeadzone, 1f, Mathf.Clamp01(axisMagnitude));
+        float amplitudeScale = Mathf.Lerp(minimumRotationHapticScale, 1f, normalizedMagnitude);
+        HapticPulse pulse = rotationHaptics;
+        pulse.amplitude = Mathf.Clamp01(pulse.amplitude * amplitudeScale);
+
+        SendHapticPulse(GetPrimaryDevice(), pulse);
+        nextRotationHapticTime = Time.time + Mathf.Max(0.01f, pulse.repeatRate);
     }
 
     private float GetLengthAxis()
@@ -557,7 +682,8 @@ public class VirtualStickController : MonoBehaviour
             return;
         }
 
-        float amplitude = Mathf.Clamp01(pulse.amplitude * hapticStrength);
+        float amplitude = pulse.amplitude * hapticStrength * motorStrengthMultiplier * GetQuestMotorScale();
+        amplitude = Mathf.Clamp01(amplitude);
         device.SendHapticImpulse(0, amplitude, pulse.duration);
     }
 
@@ -618,10 +744,69 @@ public class VirtualStickController : MonoBehaviour
         return hapticStrength;
     }
 
+    public void SetMotorStrengthMultiplier(float multiplier)
+    {
+        motorStrengthMultiplier = Mathf.Clamp(multiplier, 0.2f, 2f);
+    }
+
+    public float GetMotorStrengthMultiplier()
+    {
+        return motorStrengthMultiplier;
+    }
+
+    public void SetStickLength(float length)
+    {
+        stickLength = Mathf.Clamp(length, minStickLength, maxStickLength);
+        ApplyStickLength();
+    }
+
+    public float GetStickLength()
+    {
+        return stickLength;
+    }
+
+    public void SetTipProfile(int index)
+    {
+        ApplyTipProfile(index, true);
+    }
+
+    public void CycleTipProfile()
+    {
+        if (tipProfiles == null || tipProfiles.Length == 0)
+        {
+            return;
+        }
+
+        int nextIndex = (tipProfileIndex + 1) % tipProfiles.Length;
+        ApplyTipProfile(nextIndex, true);
+    }
+
+    public int GetTipProfileIndex()
+    {
+        return tipProfileIndex;
+    }
+
+    public int GetTipProfileCount()
+    {
+        return tipProfiles == null ? 0 : tipProfiles.Length;
+    }
+
+    public string GetCurrentTipProfileName()
+    {
+        if (tipProfiles == null || tipProfiles.Length == 0)
+        {
+            return "None";
+        }
+
+        int index = Mathf.Clamp(tipProfileIndex, 0, tipProfiles.Length - 1);
+        string name = tipProfiles[index].name;
+        return string.IsNullOrWhiteSpace(name) ? $"Profile {index + 1}" : name;
+    }
+
     public void SetRayColor(Color color)
     {
         rayBaseColor = color;
-        ApplyRayColor(rayBaseColor);
+        ApplyRayColor(rayBaseColor, currentRayHitBlend);
     }
 
     public Color GetRayColor()
@@ -629,25 +814,145 @@ public class VirtualStickController : MonoBehaviour
         return rayBaseColor;
     }
 
-    private void ApplyRayColor(Color baseColor)
+    private void ResolveTip()
+    {
+        if (stickTip == null && rayOrigin != null)
+        {
+            Transform found = rayOrigin.Find("StickTip");
+            if (found != null)
+            {
+                stickTip = found;
+            }
+        }
+
+        if (stickTip != null)
+        {
+            initialTipScale = stickTip.localScale;
+        }
+    }
+
+    private void EnsureTipProfiles()
+    {
+        if (tipProfiles != null && tipProfiles.Length > 0)
+        {
+            tipProfileIndex = Mathf.Clamp(tipProfileIndex, 0, tipProfiles.Length - 1);
+            return;
+        }
+
+        tipProfiles = new[]
+        {
+            new TipProfile(
+                "Precision",
+                0.7f,
+                0.04f,
+                new HapticPulse(0.3f, 0.015f, 0.08f),
+                new HapticPulse(0.55f, 0.03f, 0.1f),
+                new HapticPulse(0.65f, 0.05f, 0.12f)
+            ),
+            new TipProfile(
+                "Balanced",
+                1f,
+                0.06f,
+                new HapticPulse(0.45f, 0.02f, 0.1f),
+                new HapticPulse(0.65f, 0.05f, 0.12f),
+                new HapticPulse(0.75f, 0.06f, 0.12f)
+            ),
+            new TipProfile(
+                "Cushion",
+                1.35f,
+                0.1f,
+                new HapticPulse(0.6f, 0.03f, 0.08f),
+                new HapticPulse(0.8f, 0.07f, 0.1f),
+                new HapticPulse(0.9f, 0.08f, 0.1f)
+            )
+        };
+
+        tipProfileIndex = Mathf.Clamp(tipProfileIndex, 0, tipProfiles.Length - 1);
+    }
+
+    private void ApplyTipProfile(int index, bool sendFeedback)
+    {
+        if (tipProfiles == null || tipProfiles.Length == 0)
+        {
+            return;
+        }
+
+        tipProfileIndex = Mathf.Clamp(index, 0, tipProfiles.Length - 1);
+        TipProfile profile = tipProfiles[tipProfileIndex];
+
+        if (stickTip != null)
+        {
+            float multiplier = Mathf.Max(0.1f, profile.sizeMultiplier);
+            stickTip.localScale = initialTipScale * multiplier;
+        }
+
+        rayContactDistance = Mathf.Clamp(profile.contactDistance, 0.01f, 0.5f);
+        rayHoverHaptics = profile.hoverPulse;
+        contactHaptics = profile.contactPulse;
+        selectHaptics = profile.selectPulse;
+
+        if (sendFeedback)
+        {
+            SendHapticPulse(GetPrimaryDevice(), tipProfileChangeHaptics);
+        }
+    }
+
+    private float GetQuestMotorScale()
+    {
+        string model = SystemInfo.deviceModel;
+        if (string.IsNullOrWhiteSpace(model))
+        {
+            return defaultQuestMotorScale;
+        }
+
+        string normalized = model.ToLowerInvariant();
+        if (normalized.Contains("quest pro") || normalized.Contains("questpro"))
+        {
+            return questProMotorScale;
+        }
+
+        if (normalized.Contains("quest 3") || normalized.Contains("quest3"))
+        {
+            return quest3MotorScale;
+        }
+
+        if (normalized.Contains("quest 2") || normalized.Contains("quest2"))
+        {
+            return quest2MotorScale;
+        }
+
+        return defaultQuestMotorScale;
+    }
+
+    private void ApplyRayColor(Color baseColor, float hitBlend)
     {
         if (rayGradient == null)
         {
             rayGradient = new Gradient();
         }
 
-        Color startColor = Color.Lerp(baseColor, Color.white, rayStartHighlight);
-        Color endColor = Color.Lerp(baseColor, Color.black, rayEndShadow);
+        float clampedHitBlend = Mathf.Clamp01(hitBlend);
+        float hitHighlight = clampedHitBlend * rayHitBoost;
+
+        Color warmMid = new Color(1f, 0.84f, 0.58f, 1f);
+        Color startColor = Color.Lerp(baseColor, Color.white, Mathf.Clamp01(rayStartHighlight + hitHighlight));
+        Color midColor = Color.Lerp(baseColor, warmMid, Mathf.Clamp01(rayMidHighlight + hitHighlight * 0.7f));
+        Color endColor = Color.Lerp(baseColor, Color.black, Mathf.Clamp01(rayEndShadow + (1f - clampedHitBlend) * 0.1f));
         GradientColorKey[] colors =
         {
             new GradientColorKey(startColor, 0f),
+            new GradientColorKey(midColor, 0.45f),
             new GradientColorKey(endColor, 1f)
         };
+
+        float midAlpha = Mathf.Clamp01(Mathf.Lerp(rayStartAlpha, rayEndAlpha, 0.5f) + hitHighlight * 0.08f);
         GradientAlphaKey[] alphas =
         {
-            new GradientAlphaKey(rayStartAlpha, 0f),
+            new GradientAlphaKey(Mathf.Clamp01(rayStartAlpha + hitHighlight * 0.1f), 0f),
+            new GradientAlphaKey(midAlpha, 0.45f),
             new GradientAlphaKey(rayEndAlpha, 1f)
         };
+
         rayGradient.SetKeys(colors, alphas);
 
         if (rayLine != null)

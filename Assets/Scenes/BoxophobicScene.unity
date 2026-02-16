@@ -1524,6 +1524,14 @@ MonoBehaviour:
   useLeftStickForLength: 1
   lengthScaleAxis: {x: 0, y: 0, z: 1}
   inputDeadzone: 0.2
+  enableSelectionRotation: 1
+  rotationDegreesPerSecond: 110
+  invertVerticalRotation: 1
+  minimumRotationHapticScale: 0.25
+  rotationHaptics:
+    amplitude: 0.35
+    duration: 0.02
+    repeatRate: 0.05
   rayLine: {fileID: 0}
   raycastMask:
     serializedVersion: 2
@@ -1571,8 +1579,11 @@ MonoBehaviour:
   rayStartAlpha: 0.9
   rayEndAlpha: 0.35
   rayStartHighlight: 0.2
+  rayMidHighlight: 0.3
   rayEndShadow: 0.1
+  rayHitBoost: 0.3
   hapticStrength: 0.65
+  motorStrengthMultiplier: 1
   rayHoverHaptics:
     amplitude: 0.9
     duration: 0.02
@@ -1591,6 +1602,17 @@ MonoBehaviour:
   touchMask:
     serializedVersion: 2
     m_Bits: 4294967295
+  quest2MotorScale: 1
+  quest3MotorScale: 1
+  questProMotorScale: 1
+  defaultQuestMotorScale: 1
+  stickTip: {fileID: 0}
+  tipProfiles: []
+  tipProfileIndex: 1
+  tipProfileChangeHaptics:
+    amplitude: 0.4
+    duration: 0.03
+    repeatRate: 0.08
   enableRecenter: 1
   recenterHoldTime: 0.5
   recenterHaptics:
@@ -16590,8 +16612,6 @@ SceneRoots:
   - {fileID: 330585546}
   - {fileID: 410087041}
   - {fileID: 832575519}
-  - {fileID: 2076677284}
-  - {fileID: 1369369789}
   - {fileID: 301924857}
   - {fileID: 1142255676}
   - {fileID: 1195616288}

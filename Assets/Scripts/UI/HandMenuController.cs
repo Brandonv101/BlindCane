@@ -14,7 +14,7 @@ public class HandMenuController : MonoBehaviour
     [SerializeField, Min(0.0005f)] private float menuScale = 0.0015f;
 
     [Header("Menu Layout")]
-    [SerializeField] private Vector2 panelSize = new Vector2(360f, 420f);
+    [SerializeField] private Vector2 panelSize = new Vector2(360f, 620f);
     [SerializeField, Min(10f)] private float headerHeight = 34f;
     [SerializeField, Min(10f)] private float buttonHeight = 44f;
     [SerializeField, Min(0f)] private float buttonSpacing = 8f;
@@ -34,6 +34,8 @@ public class HandMenuController : MonoBehaviour
     private MenuButton recenterButton;
     private MenuButton nightButton;
     private MenuButton passthroughButton;
+    private MenuButton tipProfileButton;
+    private MenuButton motorButton;
     private MenuSlider hapticsSlider;
     private readonly List<MenuSwatch> raySwatches = new List<MenuSwatch>();
     private bool menuVisible;
@@ -79,6 +81,9 @@ public class HandMenuController : MonoBehaviour
 
     private readonly float[] hapticLevels = { 0.35f, 0.65f, 1f };
     private readonly string[] hapticLabels = { "Low", "Medium", "High" };
+    private readonly float[] motorLevels = { 0.7f, 1f, 1.3f };
+    private readonly string[] motorLabels = { "Soft", "Balanced", "Strong" };
+    private int motorLevelIndex = 1;
 
     private void Awake()
     {
@@ -167,6 +172,7 @@ public class HandMenuController : MonoBehaviour
         if (stick != null)
         {
             stick.SetHapticStrength(hapticLevels[hapticsLevelIndex]);
+            stick.SetMotorStrengthMultiplier(motorLevels[motorLevelIndex]);
         }
 
         if (street == null)
@@ -241,6 +247,12 @@ public class HandMenuController : MonoBehaviour
         passthroughButton = CreateButton(panel, "Passthrough: On", y);
         y -= buttonHeight + buttonSpacing * 1.5f;
 
+        tipProfileButton = CreateButton(panel, "Tip Profile: Balanced", y);
+        y -= buttonHeight + buttonSpacing;
+
+        motorButton = CreateButton(panel, "Motor: Balanced", y);
+        y -= buttonHeight + buttonSpacing * 1.5f;
+
         CreateHeader(panel, "Haptics", y);
         y -= headerHeight + buttonSpacing;
 
@@ -254,6 +266,8 @@ public class HandMenuController : MonoBehaviour
         recenterButton.GetComponent<Button>().onClick.AddListener(OnRecenter);
         nightButton.GetComponent<Button>().onClick.AddListener(OnToggleNight);
         passthroughButton.GetComponent<Button>().onClick.AddListener(OnTogglePassthrough);
+        tipProfileButton.GetComponent<Button>().onClick.AddListener(OnCycleTipProfile);
+        motorButton.GetComponent<Button>().onClick.AddListener(OnCycleMotorStrength);
 
         if (raySwatches.Count > 0)
         {
@@ -593,6 +607,8 @@ public class HandMenuController : MonoBehaviour
         recenterButton.SetHover(hoveredButton == recenterButton);
         nightButton.SetHover(hoveredButton == nightButton);
         passthroughButton.SetHover(hoveredButton == passthroughButton);
+        tipProfileButton.SetHover(hoveredButton == tipProfileButton);
+        motorButton.SetHover(hoveredButton == motorButton);
         if (hapticsSlider != null)
         {
             hapticsSlider.SetHover(hoveredSlider == hapticsSlider);
@@ -687,6 +703,28 @@ public class HandMenuController : MonoBehaviour
         UpdateLabels();
     }
 
+    private void OnCycleTipProfile()
+    {
+        if (stick == null)
+        {
+            return;
+        }
+
+        stick.CycleTipProfile();
+        UpdateLabels();
+    }
+
+    private void OnCycleMotorStrength()
+    {
+        motorLevelIndex = (motorLevelIndex + 1) % motorLevels.Length;
+        if (stick != null)
+        {
+            stick.SetMotorStrengthMultiplier(motorLevels[motorLevelIndex]);
+        }
+
+        UpdateLabels();
+    }
+
     private void ApplyPassthrough(bool enabled)
     {
         if (OVRManager.instance != null)
@@ -773,6 +811,17 @@ public class HandMenuController : MonoBehaviour
         if (passthroughButton != null)
         {
             passthroughButton.SetLabel($"Passthrough: {(passthroughEnabled ? "On" : "Off")}");
+        }
+
+        if (tipProfileButton != null)
+        {
+            string tipName = stick != null ? stick.GetCurrentTipProfileName() : "Balanced";
+            tipProfileButton.SetLabel($"Tip Profile: {tipName}");
+        }
+
+        if (motorButton != null)
+        {
+            motorButton.SetLabel($"Motor: {motorLabels[motorLevelIndex]}");
         }
 
         if (hapticsSlider != null)
