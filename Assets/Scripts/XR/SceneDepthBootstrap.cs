@@ -23,7 +23,7 @@ public class SceneDepthBootstrap : MonoBehaviour
     private EnvironmentDepthManager depthManager;
     private readonly List<OVRSceneAnchor> sceneAnchors = new List<OVRSceneAnchor>();
 
-    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     private static void EnsureInstance()
     {
         if (FindFirstObjectByType<SceneDepthBootstrap>(FindObjectsInactive.Include) != null)

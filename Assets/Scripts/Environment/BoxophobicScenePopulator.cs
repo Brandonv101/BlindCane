@@ -42,6 +42,10 @@ public class BoxophobicScenePopulator : MonoBehaviour
     [SerializeField, HideInInspector] private Material grassMaterial;
     [SerializeField, HideInInspector] private Material fenceMaterial;
 
+    [Header("Shader References (Do Not Remove)")]
+    [SerializeField] private Shader urpLitShader;
+    [SerializeField] private Shader urpSimpleLitShader;
+
     private void OnEnable()
     {
         if (!autoPopulate)
@@ -362,9 +366,19 @@ public class BoxophobicScenePopulator : MonoBehaviour
         return terrainMaterial;
     }
 
-    private Material CreateFallbackMaterial(Color color, string name)
+private Material CreateFallbackMaterial(Color color, string name)
     {
-        Shader shader = Shader.Find("Universal Render Pipeline/Lit");
+        Shader shader = urpLitShader;
+        if (shader == null)
+        {
+            shader = Shader.Find("Universal Render Pipeline/Lit");
+        }
+
+        if (shader == null)
+        {
+            shader = urpSimpleLitShader;
+        }
+
         if (shader == null)
         {
             shader = Shader.Find("Universal Render Pipeline/Simple Lit");
@@ -372,11 +386,7 @@ public class BoxophobicScenePopulator : MonoBehaviour
 
         if (shader == null)
         {
-            shader = Shader.Find("Standard");
-        }
-
-        if (shader == null)
-        {
+            Debug.LogWarning($"BoxophobicScenePopulator: No URP shader found for '{name}'. Assign URP Lit shader in Inspector.");
             return null;
         }
 

@@ -96,7 +96,7 @@ public class HandMenuController : MonoBehaviour
         UpdateLabels();
     }
 
-    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     private static void EnsureInstance()
     {
         if (FindFirstObjectByType<HandMenuController>(FindObjectsInactive.Include) != null)
@@ -725,16 +725,13 @@ public class HandMenuController : MonoBehaviour
         UpdateLabels();
     }
 
-    private void ApplyPassthrough(bool enabled)
+private void ApplyPassthrough(bool enabled)
     {
-        if (OVRManager.instance != null)
-        {
-            OVRManager.instance.isInsightPassthroughEnabled = enabled;
-        }
-
+        // Use OVRPassthroughLayer.hidden instead of OVRManager.isInsightPassthroughEnabled
+        // to avoid runtime freezes (known Meta SDK issue)
         foreach (OVRPassthroughLayer layer in FindObjectsByType<OVRPassthroughLayer>(FindObjectsInactive.Include, FindObjectsSortMode.None))
         {
-            layer.enabled = enabled;
+            layer.hidden = !enabled;
         }
 
         ApplySkyboxState(!enabled);

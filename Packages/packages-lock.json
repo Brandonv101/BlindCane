@@ -5,9 +5,10 @@
       "depth": 0,
       "source": "git",
       "dependencies": {
-        "com.unity.nuget.newtonsoft-json": "3.0.2"
+        "com.unity.nuget.newtonsoft-json": "3.0.2",
+        "com.unity.test-framework": "1.1.31"
       },
-      "hash": "f4a8b05094a9572fce26bad4348879d4ba15e429"
+      "hash": "f2415383b46648f78d94ee67174c252ac73d8c37"
     },
     "com.meta.xr.mrutilitykit": {
       "version": "83.0.1",
