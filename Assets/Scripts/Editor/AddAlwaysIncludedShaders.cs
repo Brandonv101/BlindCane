@@ -1,80 +1,54 @@
-
 #if UNITY_EDITOR
-using UnityEngine;
-using UnityEditor;
-using UnityEngine.Rendering;
 using System.Collections.Generic;
+using UnityEditor;
+using UnityEngine;
+using UnityEngine.Rendering;
 
 /// <summary>
-/// Adds critical URP shaders to the Always Included Shaders list in Graphics Settings.
-/// This prevents shader stripping on Android/Quest builds that causes null shader crashes.
-/// 
-/// Run via menu: Tools → Add Always Included Shaders
-/// Safe to delete after running.
+/// Removes heavy URP shaders from Always Included Shaders.
+/// Keeping these shaders always included causes very large variant builds on Android.
 /// </summary>
 public static class AddAlwaysIncludedShaders
 {
-    private static readonly string[] ShadersToInclude = new[]
+    private static readonly HashSet<string> HeavyShaders = new HashSet<string>
     {
         "Universal Render Pipeline/Lit",
         "Universal Render Pipeline/Simple Lit",
         "Universal Render Pipeline/Unlit",
-        "Universal Render Pipeline/Particles/Unlit",
+        "Universal Render Pipeline/Particles/Unlit"
     };
 
-    [MenuItem("Tools/Add Always Included Shaders")]
-    public static void AddShaders()
+    [MenuItem("Tools/Optimize/Remove Heavy Always Included URP Shaders")]
+    public static void RemoveHeavyShaders()
     {
         SerializedObject graphicsSettings = new SerializedObject(
             AssetDatabase.LoadAssetAtPath<GraphicsSettings>("ProjectSettings/GraphicsSettings.asset")
         );
-        
+
         SerializedProperty arrayProp = graphicsSettings.FindProperty("m_AlwaysIncludedShaders");
-        
         if (arrayProp == null || !arrayProp.isArray)
         {
-            Debug.LogError("[AddAlwaysIncludedShaders] Could not find m_AlwaysIncludedShaders property.");
+            Debug.LogError("[ShaderOptimize] Could not find m_AlwaysIncludedShaders.");
             return;
         }
 
-        // Collect existing shaders
-        HashSet<string> existing = new HashSet<string>();
-        for (int i = 0; i < arrayProp.arraySize; i++)
+        int removedCount = 0;
+        for (int i = arrayProp.arraySize - 1; i >= 0; i--)
         {
-            Shader s = arrayProp.GetArrayElementAtIndex(i).objectReferenceValue as Shader;
-            if (s != null)
+            Shader shader = arrayProp.GetArrayElementAtIndex(i).objectReferenceValue as Shader;
+            if (shader == null || !HeavyShaders.Contains(shader.name))
             {
-                existing.Add(s.name);
-            }
-        }
-
-        int addedCount = 0;
-        foreach (string shaderName in ShadersToInclude)
-        {
-            if (existing.Contains(shaderName))
-            {
-                Debug.Log($"[AddAlwaysIncludedShaders] Already included: {shaderName}");
                 continue;
             }
 
-            Shader shader = Shader.Find(shaderName);
-            if (shader == null)
-            {
-                Debug.LogWarning($"[AddAlwaysIncludedShaders] Shader not found: {shaderName}");
-                continue;
-            }
-
-            int newIndex = arrayProp.arraySize;
-            arrayProp.InsertArrayElementAtIndex(newIndex);
-            arrayProp.GetArrayElementAtIndex(newIndex).objectReferenceValue = shader;
-            addedCount++;
-            Debug.Log($"[AddAlwaysIncludedShaders] ADDED: {shaderName}");
+            arrayProp.DeleteArrayElementAtIndex(i);
+            removedCount++;
+            Debug.Log($"[ShaderOptimize] Removed from Always Included: {shader.name}");
         }
 
         graphicsSettings.ApplyModifiedProperties();
         AssetDatabase.SaveAssets();
-
-        Debug.Log($"[AddAlwaysIncludedShaders] Complete: {addedCount} shaders added, {existing.Count} already present.");
+        Debug.Log($"[ShaderOptimize] Complete. Removed {removedCount} heavy URP shader entries.");
     }
 }
 #endif
