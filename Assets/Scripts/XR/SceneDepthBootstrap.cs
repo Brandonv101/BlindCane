@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using Meta.XR.EnvironmentDepth;
 using UnityEngine;
 
+#pragma warning disable CS0618 // OVRSceneManager/OVRSceneAnchor are still required here until MRUK migration.
 public class SceneDepthBootstrap : MonoBehaviour
 {
     private const string RootName = "SceneDepthBootstrap";
@@ -178,3 +179,4 @@ public class SceneDepthBootstrap : MonoBehaviour
         }
     }
 }
+#pragma warning restore CS0618

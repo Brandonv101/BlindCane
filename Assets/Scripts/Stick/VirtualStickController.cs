@@ -96,6 +96,7 @@ public class VirtualStickController : MonoBehaviour
     [SerializeField] private HapticPulse rayHoverHaptics = new HapticPulse(0.9f, 0.02f, 0.1f);
     [SerializeField] private HapticPulse contactHaptics = new HapticPulse(0.6f, 0.05f, 0.12f);
     [SerializeField] private HapticPulse selectHaptics = new HapticPulse(0.7f, 0.06f, 0.12f);
+    [SerializeField] private HapticPulse releaseHaptics = new HapticPulse(0.3f, 0.045f, 0.1f);
     [SerializeField] private bool enableRayHoverHaptics = true;
     [SerializeField] private bool enableRayContactHaptics = true;
     [SerializeField, Range(0.01f, 0.5f)] private float rayContactDistance = 0.06f;
@@ -390,17 +391,20 @@ public class VirtualStickController : MonoBehaviour
 
     private void ToggleSelection()
     {
+        InputDevice primary = GetPrimaryDevice();
+
         if (currentSelection != null)
         {
             currentSelection.SetSelected(false);
             currentSelection = null;
+            SendHapticPulse(primary, releaseHaptics);
         }
 
         if (currentHover != null)
         {
             currentSelection = currentHover;
             currentSelection.SetSelected(true);
-            SendHapticPulse(GetPrimaryDevice(), selectHaptics);
+            SendHapticPulse(primary, selectHaptics);
         }
     }
 
